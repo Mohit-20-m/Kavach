@@ -1,0 +1,14 @@
+{
+  "training_completed": "2026-04-11 23:52:16",
+  "models_dir": "data/models",
+  "total_time_seconds": 411.61,
+  "agents_succeeded": 5,
+  "agents_failed": 0,
+  "results": {
+    "Code Archaeologist (XGBoost)": "\u2705 SUCCESS",
+    "Maintainer Trust (Isolation Forest)": "\u2705 SUCCESS",
+    "Behavioral Anomaly (LSTM + IsoForest)": "\u2705 SUCCESS",
+    "Semantic Intent (SBERT fine-tune)": "\u2705 SUCCESS",
+    "Meta-Learner (Logistic Regression)": "\u2705 SUCCESS"
+  }
+}

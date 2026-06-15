@@ -1,0 +1,3 @@
+[console_scripts]
+kavach = kavach_cli:app
+kavach-standalone = kavach_standalone:app

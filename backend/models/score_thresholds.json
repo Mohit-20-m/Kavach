@@ -1,0 +1,8 @@
+{
+  "SAFE_THRESHOLD": 0.1,
+  "CAUTION_THRESHOLD": 0.3,
+  "HIGH_THRESHOLD": 0.75,
+  "calibrated_on": "2026-04-11 23:52:16",
+  "test_benign_mean": 0.018,
+  "test_malicious_mean": 0.997
+}

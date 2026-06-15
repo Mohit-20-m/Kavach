@@ -1,0 +1,46 @@
+{
+  "name": "kavach-security",
+  "displayName": "KAVACH — Supply Chain Security",
+  "description": "AI-powered supply chain security. Intercepts npm and pip installs and scans with 5 AI agents. Works on macOS, Linux, and Windows. No Docker or server required.",
+  "version": "1.2.0",
+  "publisher": "kavach-security",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other", "Linters"],
+  "activationEvents": ["onStartupFinished"],
+  "keywords": ["security", "supply chain", "npm", "pip", "malware", "kavach", "zero-day"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kavach.scanPackage",
+        "title": "KAVACH: Scan Package"
+      },
+      {
+        "command": "kavach.disable",
+        "title": "KAVACH: Disable Protection"
+      },
+      {
+        "command": "kavach.enable",
+        "title": "KAVACH: Enable Protection"
+      },
+      {
+        "command": "kavach.showInstallGuide",
+        "title": "KAVACH: Show Install Guide"
+      },
+      {
+        "command": "kavach.openDashboard",
+        "title": "KAVACH: Open Dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "KAVACH Security",
+      "properties": {
+        "kavach.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to kavach-standalone (leave empty for auto-detect)"
+        }
+      }
+    }
+  }
+}

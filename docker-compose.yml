@@ -1,0 +1,102 @@
+version: '3.9'
+
+services:
+  # ─── Databases ───────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: kavach
+      POSTGRES_USER: kavach
+      POSTGRES_PASSWORD: kavach_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kavach"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  mongodb:
+    image: mongo:6
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: kavach
+      MONGO_INITDB_ROOT_PASSWORD: kavach_secret
+      MONGO_INITDB_DATABASE: kavach_unstructured
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+
+  # ─── Backend ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://kavach:kavach_secret@postgres:5432/kavach
+      - REDIS_URL=redis://redis:6379
+      - MONGODB_URL=mongodb://kavach:kavach_secret@mongodb:27017
+      - CHROMADB_URL=http://chromadb:8001
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      chromadb:
+        condition: service_started
+    volumes:
+      - ./data/models:/app/models
+      - ./data/processed:/app/data
+
+  
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=kavach_admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana-dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongo_data:
+  chroma_data:
+  mlflow_data:
+  prometheus_data:
+  grafana_data:
