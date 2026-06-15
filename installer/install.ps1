@@ -1,6 +1,6 @@
 # ============================================================
 # KAVACH — Supply Chain Security Installer for Windows
-# Supports: Windows 10/11, PowerShell 5.1+
+# Supports: Windows 10/11, PowerShell 5.1+, CMD, VS Code, Git Bash
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -84,19 +84,20 @@ function Download-Kavach {
         Write-Step "Downloading KAVACH source..."
         try {
             git clone --quiet --depth=1 "https://github.com/$GITHUB_REPO.git" $KAVACH_SRC
-            Write-OK "Source downloaded"
+            Write-OK "Source downloaded via git"
         } catch {
-            Write-Step "Trying direct download..."
+            Write-Step "git failed, trying direct download..."
             $zipUrl = "https://github.com/$GITHUB_REPO/archive/refs/heads/main.zip"
             $zipPath = Join-Path $KAVACH_DIR "kavach.zip"
             Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
             Expand-Archive -Path $zipPath -DestinationPath $KAVACH_DIR -Force
             $extractedFolder = Join-Path $KAVACH_DIR "Kavach-main"
             if (Test-Path $extractedFolder) {
+                if (Test-Path $KAVACH_SRC) { Remove-Item $KAVACH_SRC -Recurse -Force }
                 Rename-Item $extractedFolder $KAVACH_SRC
             }
             Remove-Item $zipPath -ErrorAction SilentlyContinue
-            Write-OK "Source downloaded"
+            Write-OK "Source downloaded via zip"
         }
     }
 }
@@ -114,9 +115,10 @@ function Setup-Venv {
     }
 
     $PipExe = Join-Path $KAVACH_VENV "Scripts\pip.exe"
+    $PythonExe = Join-Path $KAVACH_VENV "Scripts\python.exe"
 
     Write-Step "Installing dependencies (3-5 minutes)..."
-    & $PipExe install --quiet --upgrade pip
+    & $PythonExe -m pip install --quiet --upgrade pip 2>$null
     & $PipExe install --quiet "numpy==1.26.3" "scikit-learn==1.4.0" "xgboost==2.0.3"
     & $PipExe install --quiet "torch" "--index-url" "https://download.pytorch.org/whl/cpu"
     & $PipExe install --quiet "sentence-transformers" "httpx" "typer" "rich" "aiofiles" "pydantic"
@@ -157,85 +159,133 @@ function Create-Wrapper {
 
     $wrapperContent = "@echo off`r`nset KAVACH_MODELS_DIR=" + $KAVACH_MODELS + "`r`n`"" + $KavachExe + "`" %*"
     Set-Content -Path $WrapperPath -Value $wrapperContent -Encoding ASCII
-    Write-OK "Wrapper created at $WrapperPath"
+    Write-OK "kavach-standalone.bat created"
 }
 
-function Setup-Shell {
-    Write-Section "Setting Up Shell Intercepts"
+function Create-NpmPipWrappers {
+    Write-Section "Creating npm and pip Wrappers (works in ALL terminals)"
 
-    $WrapperBat = Join-Path $KAVACH_BIN "kavach-standalone.bat"
+    $KavachStandalone = Join-Path $KAVACH_BIN "kavach-standalone.bat"
 
+    # ── npm.bat — replaces npm in every terminal ──────────────────────────────
+    $npmWrapper = "@echo off`r`n"
+    $npmWrapper += "rem KAVACH npm wrapper — intercepts npm install`r`n"
+    $npmWrapper += "`"$KavachStandalone`" npm %*`r`n"
+    Set-Content -Path (Join-Path $KAVACH_BIN "npm.bat") -Value $npmWrapper -Encoding ASCII
+    Set-Content -Path (Join-Path $KAVACH_BIN "npm.cmd") -Value $npmWrapper -Encoding ASCII
+    Write-OK "npm.bat wrapper created"
+
+    # ── pip.bat — replaces pip in every terminal ──────────────────────────────
+    $pipWrapper = "@echo off`r`n"
+    $pipWrapper += "rem KAVACH pip wrapper — intercepts pip install`r`n"
+    $pipWrapper += "`"$KavachStandalone`" pip %*`r`n"
+    Set-Content -Path (Join-Path $KAVACH_BIN "pip.bat") -Value $pipWrapper -Encoding ASCII
+    Set-Content -Path (Join-Path $KAVACH_BIN "pip.cmd") -Value $pipWrapper -Encoding ASCII
+    Set-Content -Path (Join-Path $KAVACH_BIN "pip3.bat") -Value $pipWrapper -Encoding ASCII
+    Set-Content -Path (Join-Path $KAVACH_BIN "pip3.cmd") -Value $pipWrapper -Encoding ASCII
+    Write-OK "pip.bat wrapper created"
+
+    # ── Add KAVACH_BIN to FRONT of system PATH ────────────────────────────────
+    # This means Windows finds KAVACH's npm.bat BEFORE the real npm
+    # Works in CMD, PowerShell, VS Code terminal, Git Bash — every terminal
+    $systemPath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+    if ($systemPath -notlike "*$KAVACH_BIN*") {
+        [Environment]::SetEnvironmentVariable("PATH", "$KAVACH_BIN;$systemPath", "Machine")
+        Write-OK "KAVACH_BIN added to FRONT of system PATH"
+        Write-OK "npm and pip are now intercepted in ALL terminals"
+    } else {
+        # Make sure it's at the front
+        $cleanPath = ($systemPath -split ";" | Where-Object { $_ -ne $KAVACH_BIN }) -join ";"
+        [Environment]::SetEnvironmentVariable("PATH", "$KAVACH_BIN;$cleanPath", "Machine")
+        Write-OK "KAVACH_BIN moved to front of system PATH"
+    }
+
+    # Also add to user PATH as backup
+    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath -notlike "*$KAVACH_BIN*") {
+        [Environment]::SetEnvironmentVariable("PATH", "$KAVACH_BIN;$userPath", "User")
+        Write-OK "KAVACH_BIN added to user PATH"
+    }
+
+    # ── PowerShell profile (extra layer for PowerShell) ───────────────────────
     $ProfilePath = $PROFILE.CurrentUserAllHosts
     $ProfileDir = Split-Path $ProfilePath -Parent
-
-    if (-not (Test-Path $ProfileDir)) {
-        New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
-    }
-    if (-not (Test-Path $ProfilePath)) {
-        New-Item -ItemType File -Force -Path $ProfilePath | Out-Null
-    }
+    if (-not (Test-Path $ProfileDir)) { New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null }
+    if (-not (Test-Path $ProfilePath)) { New-Item -ItemType File -Force -Path $ProfilePath | Out-Null }
 
     $ProfileContent = Get-Content $ProfilePath -Raw -ErrorAction SilentlyContinue
-
     if ($ProfileContent -notlike "*KAVACH Supply Chain Security*") {
         $block = "`r`n# --- KAVACH Supply Chain Security ---`r`n"
         $block += "`$env:PATH = `"$KAVACH_BIN;`" + `$env:PATH`r`n"
         $block += "`$env:KAVACH_MODELS_DIR = `"$KAVACH_MODELS`"`r`n"
-        $block += "function npm { `$k = `"$WrapperBat`"; if (Test-Path `$k) { & `$k npm `$args } else { npm.cmd `$args } }`r`n"
-        $block += "function pip { `$k = `"$WrapperBat`"; if (Test-Path `$k) { & `$k pip `$args } else { pip.exe `$args } }`r`n"
-        $block += "function pip3 { `$k = `"$WrapperBat`"; if (Test-Path `$k) { & `$k pip `$args } else { pip3.exe `$args } }`r`n"
         $block += "# --- END KAVACH ---`r`n"
-
         Add-Content -Path $ProfilePath -Value $block
-        Write-OK "Added intercepts to PowerShell profile"
+        Write-OK "Added to PowerShell profile"
     } else {
-        Write-OK "Already configured"
+        Write-OK "PowerShell profile already configured"
     }
 
-    $CurrentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-    if ($CurrentPath -notlike "*$KAVACH_BIN*") {
-        [Environment]::SetEnvironmentVariable("PATH", "$KAVACH_BIN;$CurrentPath", "User")
-        Write-OK "Added $KAVACH_BIN to PATH"
+    # ── CMD autorun (extra layer for CMD) ─────────────────────────────────────
+    $BatchProfile = Join-Path $KAVACH_BIN "kavach-init.bat"
+    $batchContent = "@echo off`r`nset PATH=$KAVACH_BIN;%PATH%`r`nset KAVACH_MODELS_DIR=$KAVACH_MODELS`r`n"
+    Set-Content -Path $BatchProfile -Value $batchContent -Encoding ASCII
+
+    try {
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Command Processor" `
+            -Name "AutoRun" `
+            -Value "`"$BatchProfile`"" `
+            -ErrorAction SilentlyContinue
+        Write-OK "CMD autorun configured"
+    } catch {
+        Write-Warn "Could not configure CMD autorun (non-critical)"
     }
 }
 
 function Create-ToggleScripts {
     Write-Section "Creating Enable/Disable Commands"
 
-    # kavach-disable.bat
-    $DisableBat = Join-Path $KAVACH_BIN "kavach-disable.bat"
-    $disableContent = "@echo off`r`npowershell -ExecutionPolicy Bypass -Command `"" +
-        "`$p = `$PROFILE.CurrentUserAllHosts; " +
-        "`$c = Get-Content `$p -Raw; " +
-        "`$c = `$c -replace '(?ms)# --- KAVACH Supply Chain Security ---.*?# --- END KAVACH ---\r?\n', ''; " +
-        "Set-Content `$p `$c; " +
-        "Write-Host 'KAVACH disabled. Restart PowerShell to apply.' -ForegroundColor Yellow`""
-    Set-Content -Path $DisableBat -Value $disableContent -Encoding ASCII
+    $DisablePath = Join-Path $KAVACH_BIN "kavach-disable.bat"
+    $disableScript = "@echo off`r`n"
+    $disableScript += "echo Disabling KAVACH...`r`n"
+    $disableScript += "powershell -ExecutionPolicy Bypass -Command `""
+    $disableScript += "`$sys = [Environment]::GetEnvironmentVariable('PATH','Machine'); "
+    $disableScript += "`$clean = (`$sys -split ';' | Where-Object { `$_ -notlike '*\.kavach\bin*' }) -join ';'; "
+    $disableScript += "[Environment]::SetEnvironmentVariable('PATH', `$clean, 'Machine'); "
+    $disableScript += "`$usr = [Environment]::GetEnvironmentVariable('PATH','User'); "
+    $disableScript += "`$clean2 = (`$usr -split ';' | Where-Object { `$_ -notlike '*\.kavach\bin*' }) -join ';'; "
+    $disableScript += "[Environment]::SetEnvironmentVariable('PATH', `$clean2, 'User'); "
+    $disableScript += "Write-Host 'KAVACH disabled. Restart all terminals to apply.' -ForegroundColor Yellow`""
+    Set-Content -Path $DisablePath -Value $disableScript -Encoding ASCII
     Write-OK "kavach-disable.bat created"
 
-    # kavach-enable.bat
-    $EnableBat = Join-Path $KAVACH_BIN "kavach-enable.bat"
-    $WrapperBat = Join-Path $KAVACH_BIN "kavach-standalone.bat"
-    $enableContent = "@echo off`r`npowershell -ExecutionPolicy Bypass -Command `"" +
-        "`$p = `$PROFILE.CurrentUserAllHosts; " +
-        "`$c = Get-Content `$p -Raw -ErrorAction SilentlyContinue; " +
-        "if (`$c -notlike '*KAVACH Supply Chain Security*') { " +
-        "Add-Content `$p '``r``n# --- KAVACH Supply Chain Security ---'; " +
-        "Write-Host 'KAVACH enabled. Restart PowerShell.' -ForegroundColor Green " +
-        "} else { Write-Host 'KAVACH already enabled.' -ForegroundColor Yellow }`""
-    Set-Content -Path $EnableBat -Value $enableContent -Encoding ASCII
+    $EnablePath = Join-Path $KAVACH_BIN "kavach-enable.bat"
+    $enableScript = "@echo off`r`n"
+    $enableScript += "echo Enabling KAVACH...`r`n"
+    $enableScript += "powershell -ExecutionPolicy Bypass -Command `""
+    $enableScript += "`$sys = [Environment]::GetEnvironmentVariable('PATH','Machine'); "
+    $enableScript += "if (`$sys -notlike '*\.kavach\bin*') { "
+    $enableScript += "[Environment]::SetEnvironmentVariable('PATH', '$KAVACH_BIN;' + `$sys, 'Machine') }; "
+    $enableScript += "Write-Host 'KAVACH enabled. Restart all terminals to apply.' -ForegroundColor Green`""
+    Set-Content -Path $EnablePath -Value $enableScript -Encoding ASCII
     Write-OK "kavach-enable.bat created"
 }
 
 function Verify-Installation {
     Write-Section "Verifying Installation"
 
-    $WrapperBat = Join-Path $KAVACH_BIN "kavach-standalone.bat"
-    if (Test-Path $WrapperBat) { Write-OK "kavach-standalone.bat found" }
-    else { Write-Fail "kavach-standalone.bat missing" }
+    $checks = @(
+        (Join-Path $KAVACH_BIN "kavach-standalone.bat"),
+        (Join-Path $KAVACH_BIN "npm.bat"),
+        (Join-Path $KAVACH_BIN "pip.bat")
+    )
+
+    foreach ($f in $checks) {
+        if (Test-Path $f) { Write-OK "Found: $(Split-Path $f -Leaf)" }
+        else { Write-Fail "Missing: $(Split-Path $f -Leaf)" }
+    }
 
     $ModelCount = (Get-ChildItem $KAVACH_MODELS -ErrorAction SilentlyContinue | Measure-Object).Count
-    Write-OK "Model files present: $ModelCount"
+    Write-OK "Model files: $ModelCount"
 
     $PythonExe = Join-Path $KAVACH_VENV "Scripts\python.exe"
     try {
@@ -252,12 +302,15 @@ function Print-Success {
     Write-Host "   KAVACH Installation Complete!" -ForegroundColor Green
     Write-Host "=================================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Restart PowerShell, then try:" -ForegroundColor White
+    Write-Host "  IMPORTANT: Close ALL terminals and reopen them." -ForegroundColor Yellow
+    Write-Host "  This applies to: PowerShell, CMD, VS Code, Git Bash" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Then test in any terminal:" -ForegroundColor White
     Write-Host "    npm install lodash      -> Should show SAFE" -ForegroundColor Cyan
     Write-Host "    npm install yoshi-base  -> Should show CRITICAL BLOCKED" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  To disable: run kavach-disable" -ForegroundColor Gray
-    Write-Host "  To enable:  run kavach-enable" -ForegroundColor Gray
+    Write-Host "  To disable: kavach-disable" -ForegroundColor Gray
+    Write-Host "  To enable:  kavach-enable" -ForegroundColor Gray
     Write-Host ""
 }
 
@@ -268,7 +321,7 @@ Download-Kavach
 Setup-Venv -PythonCmd $PythonCmd
 Download-Models
 Create-Wrapper
-Setup-Shell
+Create-NpmPipWrappers
 Create-ToggleScripts
 Verify-Installation
 Print-Success
