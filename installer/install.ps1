@@ -6,7 +6,7 @@
 
 $ErrorActionPreference = "Stop"
 $KAVACH_VERSION = "1.0.0"
-$GITHUB_REPO = "kavach-security/kavach"
+$GITHUB_REPO = "Mohit-20-m/Kavach"
 $KAVACH_DIR = Join-Path $env:USERPROFILE ".kavach"
 $KAVACH_BIN = Join-Path $KAVACH_DIR "bin"
 $KAVACH_MODELS = Join-Path $KAVACH_DIR "models"
@@ -157,43 +157,18 @@ function Setup-Venv {
 function Download-Models {
     Write-Section "Downloading AI Models"
 
-    $Models = @(
-        "code_archaeologist.pkl",
-        "maintainer_isolation_forest.pkl",
-        "behavioral_isolation_forest.pkl",
-        "lstm_autoencoder.pt",
-        "meta_learner.pkl",
-        "meta_learner_scaler.pkl",
-        "score_thresholds.json",
-        "agent_weights.json",
-        "behavioral_metrics_col99.npy",
-        "maintainer_profile_col99.npy"
-    )
+    Write-Step "Downloading models package..."
+    $zipUrl = "https://github.com/Mohit-20-m/Kavach/releases/download/v1.0.0/models.zip"
+    $zipPath = Join-Path $KAVACH_DIR "models.zip"
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
 
-    $ModelBaseUrl = "https://github.com/$GITHUB_REPO/releases/download/v$KAVACH_VERSION/models"
+    Write-Step "Extracting models..."
+    Expand-Archive -Path $zipPath -DestinationPath $KAVACH_DIR -Force
+    Remove-Item $zipPath
 
-    foreach ($model in $Models) {
-        $dest = Join-Path $KAVACH_MODELS $model
-        if (-not (Test-Path $dest)) {
-            try {
-                Invoke-WebRequest -Uri "$ModelBaseUrl/$model" -OutFile $dest -UseBasicParsing
-                Write-OK "Downloaded: $model"
-            } catch {
-                Write-Warn "Could not download $model — will use defaults"
-            }
-        } else {
-            Write-OK "Already have: $model"
-        }
-    }
-
-    # Copy SBERT if in source
-    $SbertSrc = Join-Path $KAVACH_SRC "data\models\sbert_fine_tuned"
-    $SbertDst = Join-Path $KAVACH_MODELS "sbert_fine_tuned"
-    if ((Test-Path $SbertSrc) -and (-not (Test-Path $SbertDst))) {
-        Copy-Item $SbertSrc $SbertDst -Recurse
-        Write-OK "SBERT model copied"
-    }
+    Write-OK "Models ready"
 }
+
 
 # ─── Create wrapper batch file ────────────────────────────────────────────────
 function Create-Wrapper {

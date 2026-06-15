@@ -11,7 +11,7 @@ KAVACH_DIR="$HOME/.kavach"
 KAVACH_BIN="$KAVACH_DIR/bin"
 KAVACH_MODELS="$KAVACH_DIR/models"
 KAVACH_VENV="$KAVACH_DIR/venv"
-GITHUB_REPO="kavach-security/kavach"
+GITHUB_REPO="Mohit-20-m/Kavach"
 BOLD="\033[1m"
 GREEN="\033[0;32m"
 RED="\033[0;31m"
@@ -148,54 +148,24 @@ setup_venv() {
 }
 
 # ─── Download trained models ──────────────────────────────────────────────────
+# ─── Download trained models ──────────────────────────────────────────────────
 download_models() {
   log_section "Downloading AI Models"
 
-  MODEL_BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/v${KAVACH_VERSION}/models"
-
-  MODELS=(
-    "code_archaeologist.pkl"
-    "maintainer_isolation_forest.pkl"
-    "behavioral_isolation_forest.pkl"
-    "lstm_autoencoder.pt"
-    "meta_learner.pkl"
-    "meta_learner_scaler.pkl"
-    "score_thresholds.json"
-    "agent_weights.json"
-    "behavioral_metrics_col99.npy"
-    "maintainer_profile_col99.npy"
-  )
-
-  ALL_PRESENT=true
-  for model in "${MODELS[@]}"; do
-    if [ ! -f "$KAVACH_MODELS/$model" ]; then
-      ALL_PRESENT=false
-      break
-    fi
-  done
-
-  if [ "$ALL_PRESENT" = true ]; then
-    log_info "All models already present"
+  if [ -f "$KAVACH_MODELS/code_archaeologist.pkl" ]; then
+    log_info "Models already present"
     return
   fi
 
-  log_step "Downloading trained models from GitHub Releases..."
+  log_step "Downloading models package..."
+  curl -sSL "https://github.com/Mohit-20-m/Kavach/releases/download/v1.0.0/models.zip" \
+    -o "$KAVACH_DIR/models.zip"
 
-  for model in "${MODELS[@]}"; do
-    if [ ! -f "$KAVACH_MODELS/$model" ]; then
-      curl -sSL "$MODEL_BASE_URL/$model" -o "$KAVACH_MODELS/$model" 2>/dev/null && \
-        log_info "Downloaded: $model" || \
-        log_warn "Could not download $model — will use defaults"
-    else
-      log_info "Already have: $model"
-    fi
-  done
+  log_step "Extracting models..."
+  unzip -q "$KAVACH_DIR/models.zip" -d "$KAVACH_DIR/"
+  rm "$KAVACH_DIR/models.zip"
 
-  # Copy SBERT fine-tuned model if available
-  if [ -d "$KAVACH_DIR/src/data/models/sbert_fine_tuned" ]; then
-    cp -r "$KAVACH_DIR/src/data/models/sbert_fine_tuned" "$KAVACH_MODELS/"
-    log_info "SBERT model copied"
-  fi
+  log_info "Models ready"
 }
 
 # ─── Create wrapper script ────────────────────────────────────────────────────
