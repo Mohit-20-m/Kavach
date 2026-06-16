@@ -30,12 +30,22 @@ function Check-Requirements {
     Write-Section "Checking Requirements"
 
     $PythonCmd = $null
+    $script:PythonCompatible = "no"
+
+    # Check version of whatever python/python3 is available
     foreach ($cmd in @("python3", "python")) {
         try {
             $result = & $cmd -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>$null
             if ($LASTEXITCODE -eq 0) {
                 $PythonCmd = $cmd
-                Write-OK "Python found: $cmd"
+                $verCheck = & $cmd -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null
+                if ($verCheck -eq "3.10" -or $verCheck -eq "3.11") {
+                    $script:PythonCompatible = "yes"
+                    Write-OK "Python found: $cmd ($verCheck - ideal version)"
+                } else {
+                    Write-OK "Python found: $cmd ($verCheck)"
+                    Write-Warn "Newer Python detected — will use flexible dependency versions"
+                }
                 break
             }
         } catch {}
@@ -119,7 +129,19 @@ function Setup-Venv {
 
     Write-Step "Installing dependencies (3-5 minutes)..."
     & $PythonExe -m pip install --quiet --upgrade pip 2>$null
-    & $PipExe install --quiet "numpy==1.26.3" "scikit-learn==1.4.0" "xgboost==2.0.3"
+
+    if ($script:PythonCompatible -eq "yes") {
+        Write-OK "Using pinned, tested dependency versions"
+        & $PipExe install --quiet "numpy==1.26.3" "scikit-learn==1.4.0" "xgboost==2.0.3"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Pinned versions failed, falling back to flexible versions"
+            & $PipExe install --quiet "numpy>=1.26" "scikit-learn>=1.4" "xgboost>=2.0"
+        }
+    } else {
+        Write-OK "Using flexible dependency versions for this Python version"
+        & $PipExe install --quiet "numpy>=1.26" "scikit-learn>=1.4" "xgboost>=2.0"
+    }
+
     & $PipExe install --quiet "torch" "--index-url" "https://download.pytorch.org/whl/cpu"
     & $PipExe install --quiet "sentence-transformers" "httpx" "typer" "rich" "aiofiles" "pydantic"
     Write-OK "Dependencies installed"

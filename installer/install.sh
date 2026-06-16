@@ -39,15 +39,36 @@ check_requirements() {
   log_section "Checking Requirements"
 
   PYTHON=""
-  for cmd in python3.12 python3.11 python3.10 python3 python; do
+  PYTHON_COMPATIBLE=""
+
+  # Prefer 3.10/3.11 first — these have guaranteed prebuilt wheels
+  # for numpy==1.26.3, scikit-learn==1.4.0, xgboost==2.0.3
+  for cmd in python3.11 python3.10; do
     if command -v "$cmd" &>/dev/null; then
       if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
         PYTHON="$cmd"
-        log_info "Python found: $PYTHON"
+        PYTHON_COMPATIBLE="yes"
+        log_info "Python found: $PYTHON (ideal version for pinned dependencies)"
         break
       fi
     fi
   done
+
+  # Fall back to whatever 3.10+ exists (3.12, 3.13, etc.)
+  if [ -z "$PYTHON" ]; then
+    for cmd in python3.13 python3.12 python3 python; do
+      if command -v "$cmd" &>/dev/null; then
+        if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+          PYTHON="$cmd"
+          PYTHON_COMPATIBLE="no"
+          VER=$("$cmd" -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')")
+          log_info "Python found: $PYTHON (version $VER)"
+          log_warn "Newer Python detected — will use flexible dependency versions"
+          break
+        fi
+      fi
+    done
+  fi
 
   if [ -z "$PYTHON" ]; then
     log_error "Python 3.10+ required."
@@ -113,17 +134,31 @@ setup_venv() {
 
   log_step "Installing dependencies (2-3 minutes)..."
   pip install --quiet --upgrade pip
-  pip install --quiet \
-    numpy==1.26.3 \
-    scikit-learn==1.4.0 \
-    xgboost==2.0.3 \
-    torch --index-url https://download.pytorch.org/whl/cpu \
-    sentence-transformers \
-    httpx \
-    typer \
-    rich \
-    aiofiles \
-    pydantic
+
+  # IMPORTANT: each group installed separately with its own index.
+  # Combining torch's --index-url with other packages in one command
+  # causes pip to apply that index to everything, breaking numpy's
+  # build (numpy needs Cython from PyPI, not from PyTorch's index).
+  #
+  # Version strategy: on Python 3.10/3.11 we pin exact versions that
+  # are known-good and tested. On newer Python (3.12+) those exact
+  # pins often have no prebuilt wheel yet, so we let pip pick the
+  # latest compatible version automatically instead of failing.
+  if [ "$PYTHON_COMPATIBLE" = "yes" ]; then
+    log_info "Using pinned, tested dependency versions"
+    pip install --quiet "numpy==1.26.3"          || pip install --quiet "numpy>=1.26"
+    pip install --quiet "scikit-learn==1.4.0"    || pip install --quiet "scikit-learn>=1.4"
+    pip install --quiet "xgboost==2.0.3"         || pip install --quiet "xgboost>=2.0"
+  else
+    log_info "Using flexible dependency versions for this Python version"
+    pip install --quiet "numpy>=1.26"
+    pip install --quiet "scikit-learn>=1.4"
+    pip install --quiet "xgboost>=2.0"
+  fi
+
+  pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+  pip install --quiet sentence-transformers httpx typer rich aiofiles pydantic
+
   log_info "Dependencies installed"
 
   if [ -f "$KAVACH_DIR/src/cli/setup.py" ]; then
